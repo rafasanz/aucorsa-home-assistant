@@ -1,0 +1,57 @@
+{
+  "title": "Aucorsa",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Añadir línea y parada de Aucorsa",
+        "description": "Crea sensores para una línea y una parada con actualización conservadora.",
+        "data": {
+          "line": "Línea",
+          "stop_id": "ID de parada",
+          "scan_interval_seconds": "Intervalo de actualización (segundos)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se pudo conectar con AUCORSA",
+      "invalid_line": "No se pudo resolver la línea",
+      "invalid_stop": "La parada no es válida o no pertenece a esa línea"
+    },
+    "abort": {
+      "already_configured": "Esa línea y parada ya están configuradas"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Aucorsa",
+        "data": {
+          "scan_interval_seconds": "Intervalo de actualización (segundos)"
+        }
+      }
+    }
+  },
+  "device": {
+    "managed_stop": {
+      "name": "Línea {line} / Parada {stop_id}"
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_data": {
+        "name": "Actualizar datos"
+      }
+    },
+    "sensor": {
+      "next_arrival": {
+        "name": "Próximo autobús"
+      },
+      "following_arrival": {
+        "name": "Siguiente autobús"
+      },
+      "stop_name": {
+        "name": "Nombre de parada"
+      }
+    }
+  }
+}

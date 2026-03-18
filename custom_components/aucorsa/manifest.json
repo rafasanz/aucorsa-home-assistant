@@ -1,0 +1,13 @@
+{
+  "domain": "aucorsa",
+  "name": "Aucorsa",
+  "codeowners": [
+    "@rafasanz"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/rafasanz/aucorsa-home-assistant",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/rafasanz/aucorsa-home-assistant/issues",
+  "version": "0.7.0"
+}

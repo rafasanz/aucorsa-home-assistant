@@ -1,0 +1,11 @@
+panel_custom:
+  - name: aucorsa-panel
+    sidebar_title: Aucorsa
+    sidebar_icon: mdi:bus-clock
+    url_path: aucorsa
+    module_url: /api/aucorsa/static/aucorsa-panel.js
+    config:
+      title: Aucorsa
+      subtitle: Tiempos de llegada por parada
+      # stop_ids:
+      #   - "101"

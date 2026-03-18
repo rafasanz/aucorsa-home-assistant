@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aucorsa-api"
+dynamic = ["version"]
+description = "Cliente y CLI para consultar tiempos de paso de AUCORSA"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+]
+
+[project.scripts]
+aucorsa-cli = "aucorsa.cli:main"
+
+[tool.setuptools]
+packages = ["aucorsa"]
+
+[tool.setuptools.dynamic]
+version = {attr = "aucorsa.__version__"}

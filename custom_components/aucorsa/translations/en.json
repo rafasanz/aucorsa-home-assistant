@@ -1,0 +1,57 @@
+{
+  "title": "Aucorsa",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add Aucorsa line and stop",
+        "description": "Create sensors for a bus line and stop with conservative polling.",
+        "data": {
+          "line": "Line",
+          "stop_id": "Stop ID",
+          "scan_interval_seconds": "Polling interval (seconds)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to AUCORSA",
+      "invalid_line": "The line could not be resolved",
+      "invalid_stop": "The stop is invalid or does not belong to that line"
+    },
+    "abort": {
+      "already_configured": "This line and stop are already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Aucorsa options",
+        "data": {
+          "scan_interval_seconds": "Polling interval (seconds)"
+        }
+      }
+    }
+  },
+  "device": {
+    "managed_stop": {
+      "name": "Line {line} / Stop {stop_id}"
+    }
+  },
+  "entity": {
+    "button": {
+      "refresh_data": {
+        "name": "Refresh data"
+      }
+    },
+    "sensor": {
+      "next_arrival": {
+        "name": "Next arrival"
+      },
+      "following_arrival": {
+        "name": "Following arrival"
+      },
+      "stop_name": {
+        "name": "Stop name"
+      }
+    }
+  }
+}
