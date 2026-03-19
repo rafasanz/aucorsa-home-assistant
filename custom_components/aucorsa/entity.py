@@ -27,7 +27,7 @@ class AucorsaEntity(CoordinatorEntity[AucorsaCoordinator]):
         return DeviceInfo(
             identifiers={(DOMAIN, self.config_entry.entry_id)},
             manufacturer=MANUFACTURER,
-            model="Bus arrival service",
+            model="Servicio de llegada de autobuses",
             translation_key="managed_stop",
             translation_placeholders={
                 "line": self.coordinator.data.line,

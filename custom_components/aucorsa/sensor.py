@@ -73,7 +73,7 @@ class AucorsaStopNameSensor(AucorsaEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        return self.coordinator.data.stop_label or f"Stop {self.coordinator.data.stop_id}"
+        return self.coordinator.data.stop_label or f"Parada {self.coordinator.data.stop_id}"
 
     @property
     def extra_state_attributes(self) -> dict[str, str | int | bool | None]:

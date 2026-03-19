@@ -1,10 +1,18 @@
 const AUCORSA_LOGO_URL = "https://cdn.aucorsa.es/wp-content/uploads/2023/05/logo-aucorsa.svg";
+
+function normalizeLegacySubtitle(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 const LEGACY_PANEL_SUBTITLES = new Set([
   "Tiempos de llegada desde los sensores ya cargados",
   "Visual panel based on the integration sensors",
-  "Panel visual basado en los sensores de la integracion",
   "Panel visual basado en los sensores de la integración",
-]);
+].map((subtitle) => normalizeLegacySubtitle(subtitle)));
 
 const DEFAULT_LINE_COLORS = {
   "1": "#1f7a57",
@@ -133,7 +141,7 @@ function getTexts(language) {
     notUpdated: "Sin actualizar todavía",
     createdBy: "Creado por",
     githubLabel: "@rafasanz",
-    cardTitleDefault: "Parada Aucorsa",
+    cardTitleDefault: "Parada de Aucorsa",
     chooseStop: "Parada",
     showHeader: "Mostrar cabecera",
     showRefresh: "Mostrar botón de actualización",
@@ -383,7 +391,7 @@ function renderPanelMarkup({ hass, config, narrow, refreshing }) {
   const refreshDisabled = refreshing || viewModel.refreshEntityIds.length === 0;
   const title = escapeHtml(config?.title || labels.title);
   const subtitle = escapeHtml(
-    LEGACY_PANEL_SUBTITLES.has(String(config?.subtitle || "").trim())
+    LEGACY_PANEL_SUBTITLES.has(normalizeLegacySubtitle(config?.subtitle))
       ? labels.subtitle
       : config?.subtitle || labels.subtitle
   );
@@ -775,7 +783,7 @@ function renderCardMarkup({ hass, config, refreshing }) {
   const hasCustomTitle = rawTitle && rawTitle !== labels.title;
   const title = escapeHtml(hasCustomTitle ? rawTitle : labels.title);
   const subtitle = escapeHtml(
-    LEGACY_PANEL_SUBTITLES.has(String(config?.subtitle || "").trim())
+    LEGACY_PANEL_SUBTITLES.has(normalizeLegacySubtitle(config?.subtitle))
       ? labels.subtitle
       : config?.subtitle || labels.subtitle
   );
@@ -1118,7 +1126,7 @@ class AucorsaViewBase extends HTMLElement {
       await this._hass.callService("button", "press", {}, { entity_id: viewModel.refreshEntityIds });
     } catch (error) {
       // eslint-disable-next-line no-console
-      console.error("Aucorsa refresh failed", error);
+      console.error("Error al refrescar Aucorsa", error);
     } finally {
       this._refreshing = false;
       this._render();
