@@ -1,3 +1,4 @@
+import html
 import re
 import sys
 import unicodedata
@@ -11,7 +12,7 @@ from .parser import parse_estimations_response
 
 
 PAGE_URL = "https://aucorsa.es/tiempos-de-paso/"
-API_URL = "https://aucorsa.es/wp-json/aucorsa/v1"
+DEFAULT_API_URL = "https://aucorsa.es/wp-json/aucorsa/v1"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -43,36 +44,51 @@ class AucorsaClient:
 
     def extract_nonce(self, page_html: str) -> str:
         patterns = [
-            r'ajax_nonce["\']?\s*:\s*["\']([a-zA-Z0-9]+)["\']',
-            r'"ajax_nonce"\s*:\s*"([a-zA-Z0-9]+)"',
-            r'ajax_nonce=([a-zA-Z0-9]+)',
+            r'ajax_nonce["\']?\s*:\s*["\']([^"\']+)["\']',
+            r'"ajax_nonce"\s*:\s*"([^"]+)"',
+            r'ajax_nonce=([a-zA-Z0-9_-]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, page_html)
             if match:
-                nonce = match.group(1)
+                nonce = html.unescape(match.group(1)).strip()
                 self._log(f"Nonce encontrado: {nonce}")
                 return nonce
         raise RuntimeError("No se pudo extraer el _wpnonce de la página")
 
     def extract_post_id(self, page_html: str) -> str:
         patterns = [
-            r'"post_id"\s*:\s*"(\d+)"',
-            r'post_id["\']?\s*:\s*["\']?(\d+)',
+            r'"post_id"\s*:\s*"([^"]+)"',
+            r'post_id["\']?\s*:\s*["\']?([0-9]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, page_html)
             if match:
-                post_id = match.group(1)
+                post_id = html.unescape(match.group(1)).strip()
                 self._log(f"post_id encontrado: {post_id}")
                 return post_id
         raise RuntimeError("No se pudo extraer el post_id de la página")
+
+    def extract_api_url(self, page_html: str) -> str:
+        patterns = [
+            r'"api_url"\s*:\s*"([^"]+)"',
+            r"api_url['\"]?\s*:\s*['\"]([^'\"]+)['\"]",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, page_html)
+            if match:
+                api_url = html.unescape(match.group(1)).replace("\\/", "/").strip()
+                if api_url:
+                    self._log(f"api_url encontrada: {api_url}")
+                    return api_url.rstrip("/")
+        return DEFAULT_API_URL
 
     def refresh_context(self) -> PageContext:
         page_html = self.fetch_page()
         self._context = PageContext(
             nonce=self.extract_nonce(page_html),
             post_id=self.extract_post_id(page_html),
+            api_url=self.extract_api_url(page_html),
         )
         return self._context
 
@@ -84,7 +100,7 @@ class AucorsaClient:
         request_params = dict(params)
         request_params.setdefault("_wpnonce", context.nonce)
 
-        url = f"{API_URL}{path}"
+        url = f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}"
         self._log(f"GET {url} params={request_params}")
         response = self.session.get(url, params=request_params, timeout=20)
         response.raise_for_status()

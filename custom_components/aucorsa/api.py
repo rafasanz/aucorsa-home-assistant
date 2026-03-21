@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 import re
 import time
@@ -14,7 +15,7 @@ from .parser import parse_estimations_response
 _LOGGER = logging.getLogger(__name__)
 
 PAGE_URL = "https://aucorsa.es/tiempos-de-paso/"
-API_URL = "https://aucorsa.es/wp-json/aucorsa/v1"
+DEFAULT_API_URL = "https://aucorsa.es/wp-json/aucorsa/v1"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -80,32 +81,46 @@ class AucorsaApi:
 
     def extract_nonce(self, page_html: str) -> str:
         patterns = [
-            r'ajax_nonce["\']?\s*:\s*["\']([a-zA-Z0-9]+)["\']',
-            r'"ajax_nonce"\s*:\s*"([a-zA-Z0-9]+)"',
-            r'ajax_nonce=([a-zA-Z0-9]+)',
+            r'ajax_nonce["\']?\s*:\s*["\']([^"\']+)["\']',
+            r'"ajax_nonce"\s*:\s*"([^"]+)"',
+            r'ajax_nonce=([a-zA-Z0-9_-]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, page_html)
             if match:
-                return match.group(1)
+                return html.unescape(match.group(1)).strip()
         raise RuntimeError("No se pudo extraer el _wpnonce de la página")
 
     def extract_post_id(self, page_html: str) -> str:
         patterns = [
-            r'"post_id"\s*:\s*"(\d+)"',
-            r'post_id["\']?\s*:\s*["\']?(\d+)',
+            r'"post_id"\s*:\s*"([^"]+)"',
+            r'post_id["\']?\s*:\s*["\']?([0-9]+)',
         ]
         for pattern in patterns:
             match = re.search(pattern, page_html)
             if match:
-                return match.group(1)
+                return html.unescape(match.group(1)).strip()
         raise RuntimeError("No se pudo extraer el post_id de la página")
+
+    def extract_api_url(self, page_html: str) -> str:
+        patterns = [
+            r'"api_url"\s*:\s*"([^"]+)"',
+            r"api_url['\"]?\s*:\s*['\"]([^'\"]+)['\"]",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, page_html)
+            if match:
+                api_url = html.unescape(match.group(1)).replace("\\/", "/").strip()
+                if api_url:
+                    return api_url.rstrip("/")
+        return DEFAULT_API_URL
 
     async def refresh_context(self) -> PageContext:
         page_html = await self.fetch_page()
         self._context = PageContext(
             nonce=self.extract_nonce(page_html),
             post_id=self.extract_post_id(page_html),
+            api_url=self.extract_api_url(page_html),
         )
         return self._context
 
@@ -122,7 +137,10 @@ class AucorsaApi:
         request_params = dict(params)
         request_params.setdefault("_wpnonce", context.nonce)
 
-        text = await self._throttled_get(f"{API_URL}{path}", params=request_params)
+        text = await self._throttled_get(
+            f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}",
+            params=request_params,
+        )
         if text.strip() != "-1":
             return text
 

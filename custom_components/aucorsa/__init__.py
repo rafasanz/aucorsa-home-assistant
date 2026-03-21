@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 
@@ -76,10 +77,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             domain_data[DATA_API] = api
 
         coordinator = AucorsaCoordinator(hass, api, entry)
-        await coordinator.async_config_entry_first_refresh()
+        try:
+            await coordinator.async_config_entry_first_refresh()
+        except ConfigEntryNotReady:
+            _cleanup_domain_data(hass, entry.entry_id)
+            raise
 
         domain_data[entry.entry_id] = coordinator
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except ConfigEntryNotReady:
+        raise
     except Exception:
         _LOGGER.exception(
             "AUCORSA no se pudo cargar para la entrada %s. "

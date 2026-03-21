@@ -6,6 +6,7 @@ from typing import Optional
 class PageContext:
     nonce: str
     post_id: str
+    api_url: Optional[str] = None
 
 
 @dataclass(frozen=True)

@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from typing import Optional
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -26,7 +27,10 @@ class AucorsaCoordinator(DataUpdateCoordinator[EstimationResult]):
         self.entry = entry
         self.line = entry.data[CONF_LINE]
         self.stop_id = entry.data[CONF_STOP_ID]
-        self.internal_line_id = entry.data[CONF_INTERNAL_LINE_ID]
+        raw_internal_line_id = entry.data.get(CONF_INTERNAL_LINE_ID)
+        self.internal_line_id: Optional[str] = (
+            str(raw_internal_line_id).strip() if raw_internal_line_id is not None else None
+        ) or None
         scan_interval_seconds = entry.options.get(
             CONF_SCAN_INTERVAL_SECONDS,
             DEFAULT_SCAN_INTERVAL_SECONDS,

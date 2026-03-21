@@ -1,7 +1,7 @@
 import json
 import re
 from html.parser import HTMLParser
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from .models import LineEstimation, StopEstimationsResult
 
@@ -9,6 +9,11 @@ from .models import LineEstimation, StopEstimationsResult
 MINUTES_RE = re.compile(r"(\d+)\s*minuto(?:s)?", re.IGNORECASE)
 CSS_DECLARATION_RE = re.compile(r"([a-zA-Z-]+)\s*:\s*([^;]+)")
 COLOR_VALUE_RE = re.compile(r"(#[0-9a-fA-F]{3,8}|rgb[a]?\([^)]+\))")
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:  # pragma: no cover - se cubre con el fallback estándar
+    BeautifulSoup = None
 
 
 def _clean_text(text: str) -> str:
@@ -113,14 +118,56 @@ def _extract_color_from_style(style: Optional[str]) -> Optional[str]:
     return None
 
 
-def parse_escaped_html_response(response_text: str) -> str:
-    try:
-        html_string = json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"La respuesta no era un JSON-string válido: {exc}") from exc
+def _looks_like_html(value: str) -> bool:
+    text = str(value or "").lstrip()
+    return text.startswith("<") and ">" in text
 
-    if not isinstance(html_string, str):
-        raise RuntimeError("La API no devolvió un string HTML dentro del JSON")
+
+def _extract_html_from_payload(payload: Any) -> Optional[str]:
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if _looks_like_html(stripped):
+            return stripped
+        return None
+
+    if isinstance(payload, dict):
+        preferred_keys = ("html", "content", "markup", "data", "response", "result")
+        for key in preferred_keys:
+            if key in payload:
+                extracted = _extract_html_from_payload(payload[key])
+                if extracted is not None:
+                    return extracted
+
+        for value in payload.values():
+            extracted = _extract_html_from_payload(value)
+            if extracted is not None:
+                return extracted
+
+    if isinstance(payload, list):
+        for item in payload:
+            extracted = _extract_html_from_payload(item)
+            if extracted is not None:
+                return extracted
+
+    return None
+
+
+def parse_escaped_html_response(response_text: str) -> str:
+    stripped_response = str(response_text or "").strip()
+    if not stripped_response:
+        raise RuntimeError("La API devolvió una respuesta vacía")
+
+    if _looks_like_html(stripped_response):
+        return stripped_response
+
+    try:
+        payload = json.loads(stripped_response)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"La respuesta no era JSON ni HTML válido: {exc}") from exc
+
+    html_string = _extract_html_from_payload(payload)
+    if html_string is None:
+        raise RuntimeError("La API no devolvió HTML reconocible dentro de la respuesta")
 
     return html_string
 
@@ -135,11 +182,46 @@ def parse_estimations_html(
         for visible_line, internal_line_id in (line_id_by_visible or {}).items()
     }
 
-    html_parser = _EstimationsHTMLParser()
-    html_parser.feed(html_string)
+    if BeautifulSoup is not None:
+        soup = BeautifulSoup(html_string, "html.parser")
+        stop_label = None
+
+        stop_el = soup.select_one(".ppp-stop-label")
+        if stop_el:
+            stop_label = stop_el.get_text(" ", strip=True)
+
+        container_payloads = []
+        for container in soup.select(".ppp-container"):
+            line_el = container.select_one(".ppp-line-number")
+            if not line_el:
+                continue
+
+            route = None
+            route_el = container.select_one(".ppp-line-route")
+            if route_el:
+                route = route_el.get_text(" ", strip=True)
+
+            estimations_el = container.select_one(".ppp-estimations")
+            container_payloads.append(
+                {
+                    "line": line_el.get_text(" ", strip=True),
+                    "route": route,
+                    "color": _extract_color_from_style(line_el.get("style"))
+                    or _extract_color_from_style(estimations_el.get("style") if estimations_el else None),
+                    "estimations": [
+                        estimation_el.get_text(" ", strip=True)
+                        for estimation_el in container.select(".ppp-estimation")
+                    ],
+                }
+            )
+    else:
+        html_parser = _EstimationsHTMLParser()
+        html_parser.feed(html_string)
+        stop_label = html_parser.stop_label
+        container_payloads = html_parser.containers
 
     lines: list[LineEstimation] = []
-    for container in html_parser.containers:
+    for container in container_payloads:
         visible_line = container.get("line")
         if not visible_line:
             continue
@@ -163,7 +245,7 @@ def parse_estimations_html(
 
     return StopEstimationsResult(
         stop_id=str(stop_id),
-        stop_label=html_parser.stop_label,
+        stop_label=stop_label,
         lines=lines,
     )
 

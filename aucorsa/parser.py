@@ -1,7 +1,7 @@
 import json
 import re
 from html.parser import HTMLParser
-from typing import Mapping, Optional
+from typing import Any, Mapping, Optional
 
 from .models import LineEstimation, StopEstimationsResult
 
@@ -118,14 +118,56 @@ def _extract_color_from_style(style: Optional[str]) -> Optional[str]:
     return None
 
 
-def parse_escaped_html_response(response_text: str) -> str:
-    try:
-        html_string = json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"La respuesta no era un JSON-string válido: {exc}") from exc
+def _looks_like_html(value: str) -> bool:
+    text = str(value or "").lstrip()
+    return text.startswith("<") and ">" in text
 
-    if not isinstance(html_string, str):
-        raise RuntimeError("La API no devolvió un string HTML dentro del JSON")
+
+def _extract_html_from_payload(payload: Any) -> Optional[str]:
+    if isinstance(payload, str):
+        stripped = payload.strip()
+        if _looks_like_html(stripped):
+            return stripped
+        return None
+
+    if isinstance(payload, dict):
+        preferred_keys = ("html", "content", "markup", "data", "response", "result")
+        for key in preferred_keys:
+            if key in payload:
+                extracted = _extract_html_from_payload(payload[key])
+                if extracted is not None:
+                    return extracted
+
+        for value in payload.values():
+            extracted = _extract_html_from_payload(value)
+            if extracted is not None:
+                return extracted
+
+    if isinstance(payload, list):
+        for item in payload:
+            extracted = _extract_html_from_payload(item)
+            if extracted is not None:
+                return extracted
+
+    return None
+
+
+def parse_escaped_html_response(response_text: str) -> str:
+    stripped_response = str(response_text or "").strip()
+    if not stripped_response:
+        raise RuntimeError("La API devolvió una respuesta vacía")
+
+    if _looks_like_html(stripped_response):
+        return stripped_response
+
+    try:
+        payload = json.loads(stripped_response)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"La respuesta no era JSON ni HTML válido: {exc}") from exc
+
+    html_string = _extract_html_from_payload(payload)
+    if html_string is None:
+        raise RuntimeError("La API no devolvió HTML reconocible dentro de la respuesta")
 
     return html_string
 
