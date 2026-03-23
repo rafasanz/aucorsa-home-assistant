@@ -1,7 +1,10 @@
 import json
 import unittest
+from unittest.mock import Mock
 
+import requests
 from aucorsa.client import AucorsaClient
+from aucorsa.models import PageContext
 from aucorsa.parser import parse_estimations_response
 
 
@@ -92,6 +95,57 @@ class ClientContextExtractionTests(unittest.TestCase):
             client.extract_api_url(page_html),
             "https://cdn.aucorsa.es/wp-json/aucorsa/v1",
         )
+
+
+class ClientNonceRecoveryTests(unittest.TestCase):
+    def test_api_get_refreshes_context_after_invalid_nonce_403(self):
+        client = AucorsaClient()
+        client._context = PageContext(
+            nonce="stale-nonce",
+            post_id="6935",
+            api_url="https://aucorsa.es/wp-json/aucorsa/v1",
+        )
+
+        fresh_context = PageContext(
+            nonce="fresh-nonce",
+            post_id="6935",
+            api_url="https://aucorsa.es/wp-json/aucorsa/v1",
+        )
+
+        def _refresh_context():
+            client._context = fresh_context
+            return fresh_context
+
+        client.refresh_context = Mock(side_effect=_refresh_context)
+
+        invalid_nonce_response = Mock(status_code=403)
+        invalid_nonce_response.text = (
+            '{"code":"rest_cookie_invalid_nonce","message":"Ha fallado la comprobacion"}'
+        )
+        invalid_nonce_response.raise_for_status.side_effect = requests.HTTPError("403 invalid nonce")
+
+        success_response = Mock(status_code=200)
+        success_response.text = "[]"
+        success_response.raise_for_status.return_value = None
+        success_response.json.return_value = []
+
+        captured_params: list[dict[str, str]] = []
+
+        def _session_get(*args, **kwargs):
+            captured_params.append(dict(kwargs["params"]))
+            if len(captured_params) == 1:
+                return invalid_nonce_response
+            return success_response
+
+        client.session.get = Mock(side_effect=_session_get)
+
+        response = client._api_get("/autocompletion/line", {"term": "12"})
+
+        self.assertIs(response, success_response)
+        client.refresh_context.assert_called_once()
+        self.assertEqual(client.session.get.call_count, 2)
+        self.assertEqual(captured_params[0]["_wpnonce"], "stale-nonce")
+        self.assertEqual(captured_params[1]["_wpnonce"], "fresh-nonce")
 
 
 if __name__ == "__main__":

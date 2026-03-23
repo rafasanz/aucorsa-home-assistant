@@ -25,6 +25,15 @@ HEADERS = {
 LINE_LABEL_SEPARATOR = "\u3164"
 
 
+class InvalidNonceError(RuntimeError):
+    """Raised when AUCORSA rejects the cached nonce."""
+
+
+def _is_invalid_nonce_response(status_code: int, text: str) -> bool:
+    payload = text.strip()
+    return payload == "-1" or (status_code == 403 and "rest_cookie_invalid_nonce" in payload)
+
+
 def normalize_line_label(label: str) -> str:
     return re.sub(r"\s+", " ", label.replace(LINE_LABEL_SEPARATOR, " ")).strip()
 
@@ -70,6 +79,9 @@ class AucorsaApi:
             async with self._session.get(url, params=params, headers=HEADERS, timeout=20) as response:
                 text = await response.text()
                 self._last_request_monotonic = time.monotonic()
+
+                if _is_invalid_nonce_response(response.status, text):
+                    raise InvalidNonceError("AUCORSA rechazo el nonce actual")
 
                 if response.status >= 400:
                     raise RuntimeError(f"HTTP {response.status} al consultar {url}: {text[:200]!r}")
@@ -137,20 +149,25 @@ class AucorsaApi:
         request_params = dict(params)
         request_params.setdefault("_wpnonce", context.nonce)
 
-        text = await self._throttled_get(
-            f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}",
-            params=request_params,
-        )
-        if text.strip() != "-1":
-            return text
+        try:
+            return await self._throttled_get(
+                f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}",
+                params=request_params,
+            )
+        except InvalidNonceError as exc:
+            if not retry_with_fresh_nonce:
+                raise RuntimeError(
+                    "La API rechazo el nonce incluso tras refrescar el contexto"
+                ) from exc
 
-        if not retry_with_fresh_nonce:
-            raise RuntimeError("La API devolvió -1 incluso tras refrescar el nonce")
-
-        _LOGGER.debug("Nonce caducado; refrescando contexto y reintentando")
-        context = await self.refresh_context()
-        request_params["_wpnonce"] = context.nonce
-        return await self._api_get_text(path, request_params, retry_with_fresh_nonce=False)
+            _LOGGER.debug("Nonce invalido o caducado; refrescando contexto y reintentando")
+            self._context = None
+            context = await self.refresh_context()
+            request_params["_wpnonce"] = context.nonce
+            return await self._api_get_text(path, request_params, retry_with_fresh_nonce=False)
+        except (ClientError, asyncio.TimeoutError):
+            self._context = None
+            raise
 
     async def _api_get_json(self, path: str, params: dict[str, Any]) -> Any:
         import json

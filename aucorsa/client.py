@@ -20,6 +20,11 @@ HEADERS = {
 }
 
 
+def _is_invalid_nonce_response(status_code: int, text: str) -> bool:
+    payload = text.strip()
+    return payload == "-1" or (status_code == 403 and "rest_cookie_invalid_nonce" in payload)
+
+
 def _normalize_search_text(text: str) -> str:
     normalized = unicodedata.normalize("NFD", text.casefold())
     return "".join(char for char in normalized if unicodedata.category(char) != "Mn")
@@ -103,17 +108,18 @@ class AucorsaClient:
         url = f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}"
         self._log(f"GET {url} params={request_params}")
         response = self.session.get(url, params=request_params, timeout=20)
-        response.raise_for_status()
 
-        if response.text.strip() == "-1":
+        if _is_invalid_nonce_response(response.status_code, response.text):
             if not retry_with_fresh_nonce:
-                raise RuntimeError("La API devolvió -1 incluso tras refrescar el nonce")
+                raise RuntimeError("La API rechazo el nonce incluso tras refrescar el contexto")
 
-            self._log("Respuesta -1 recibida; refrescando nonce y reintentando")
+            self._log("Nonce invalido o caducado; refrescando contexto y reintentando")
+            self._context = None
             context = self.refresh_context()
             request_params["_wpnonce"] = context.nonce
             return self._api_get(path, request_params, retry_with_fresh_nonce=False)
 
+        response.raise_for_status()
         self._log(f"Status API: {response.status_code}")
         return response
 
