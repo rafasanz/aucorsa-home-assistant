@@ -11,3 +11,6 @@ __pycache__/
 .idea/
 .vscode/
 custom_components/.translations/
+
+# Local conversation memory for Codex sessions
+.session_notes/
