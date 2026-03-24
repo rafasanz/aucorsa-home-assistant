@@ -147,6 +147,69 @@ class ClientNonceRecoveryTests(unittest.TestCase):
         self.assertEqual(captured_params[0]["_wpnonce"], "stale-nonce")
         self.assertEqual(captured_params[1]["_wpnonce"], "fresh-nonce")
 
+    def test_api_get_refreshes_context_after_generic_403(self):
+        client = AucorsaClient()
+        client._context = PageContext(
+            nonce="stale-nonce",
+            post_id="6935",
+            api_url="https://aucorsa.es/wp-json/aucorsa/v1",
+        )
+
+        fresh_context = PageContext(
+            nonce="fresh-nonce",
+            post_id="6935",
+            api_url="https://aucorsa.es/wp-json/aucorsa/v1",
+        )
+
+        def _refresh_context():
+            client._context = fresh_context
+            return fresh_context
+
+        client.refresh_context = Mock(side_effect=_refresh_context)
+
+        forbidden_response = Mock(status_code=403)
+        forbidden_response.text = '{"message":"Forbidden"}'
+        forbidden_response.raise_for_status.side_effect = requests.HTTPError("403 forbidden")
+
+        success_response = Mock(status_code=200)
+        success_response.text = "[]"
+        success_response.raise_for_status.return_value = None
+        success_response.json.return_value = []
+
+        captured_params: list[dict[str, str]] = []
+
+        def _session_get(*args, **kwargs):
+            captured_params.append(dict(kwargs["params"]))
+            if len(captured_params) == 1:
+                return forbidden_response
+            return success_response
+
+        client.session.get = Mock(side_effect=_session_get)
+
+        response = client._api_get("/autocompletion/line", {"term": "12"})
+
+        self.assertIs(response, success_response)
+        client.refresh_context.assert_called_once()
+        self.assertEqual(client.session.get.call_count, 2)
+        self.assertEqual(captured_params[0]["_wpnonce"], "stale-nonce")
+        self.assertEqual(captured_params[1]["_wpnonce"], "fresh-nonce")
+
+    def test_fetch_page_clears_aucorsa_cookies_before_request(self):
+        client = AucorsaClient()
+        client.session.cookies.clear = Mock()
+
+        page_response = Mock(status_code=200)
+        page_response.text = "<html></html>"
+        page_response.raise_for_status.return_value = None
+        client.session.get = Mock(return_value=page_response)
+
+        page_html = client.fetch_page()
+
+        self.assertEqual(page_html, "<html></html>")
+        client.session.cookies.clear.assert_any_call(domain="aucorsa.es")
+        client.session.cookies.clear.assert_any_call(domain=".aucorsa.es")
+        client.session.get.assert_called_once_with("https://aucorsa.es/tiempos-de-paso/", timeout=20)
+
 
 if __name__ == "__main__":
     unittest.main()

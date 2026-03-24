@@ -3,6 +3,7 @@ import re
 import sys
 import unicodedata
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -20,9 +21,21 @@ HEADERS = {
 }
 
 
-def _is_invalid_nonce_response(status_code: int, text: str) -> bool:
+def _should_refresh_context(status_code: int, text: str) -> bool:
     payload = text.strip()
-    return payload == "-1" or (status_code == 403 and "rest_cookie_invalid_nonce" in payload)
+    return status_code == 403 or payload == "-1" or "rest_cookie_invalid_nonce" in payload
+
+
+def _cookie_domains_for_urls(*urls: str) -> set[str]:
+    domains: set[str] = set()
+    for url in urls:
+        host = urlparse(url).hostname
+        if not host:
+            continue
+        normalized = host.lstrip(".")
+        domains.add(normalized)
+        domains.add(f".{normalized}")
+    return domains
 
 
 def _normalize_search_text(text: str) -> str:
@@ -41,7 +54,16 @@ class AucorsaClient:
         if self.debug:
             print(f"[DEBUG] {msg}", file=sys.stderr)
 
+    def _clear_aucorsa_cookies(self, *urls: str) -> None:
+        current_api_url = self._context.api_url if self._context is not None else ""
+        for domain in _cookie_domains_for_urls(PAGE_URL, DEFAULT_API_URL, current_api_url, *urls):
+            try:
+                self.session.cookies.clear(domain=domain)
+            except KeyError:
+                continue
+
     def fetch_page(self) -> str:
+        self._clear_aucorsa_cookies(PAGE_URL)
         self._log(f"GET {PAGE_URL}")
         response = self.session.get(PAGE_URL, timeout=20)
         response.raise_for_status()
@@ -106,15 +128,19 @@ class AucorsaClient:
         request_params.setdefault("_wpnonce", context.nonce)
 
         url = f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}"
+        self._clear_aucorsa_cookies(url)
         self._log(f"GET {url} params={request_params}")
         response = self.session.get(url, params=request_params, timeout=20)
 
-        if _is_invalid_nonce_response(response.status_code, response.text):
+        if _should_refresh_context(response.status_code, response.text):
             if not retry_with_fresh_nonce:
-                raise RuntimeError("La API rechazo el nonce incluso tras refrescar el contexto")
+                raise RuntimeError(
+                    "La API rechazo el contexto incluso tras limpiar cookies y refrescar el nonce"
+                )
 
             self._log("Nonce invalido o caducado; refrescando contexto y reintentando")
             self._context = None
+            self._clear_aucorsa_cookies(PAGE_URL, context.api_url or DEFAULT_API_URL)
             context = self.refresh_context()
             request_params["_wpnonce"] = context.nonce
             return self._api_get(path, request_params, retry_with_fresh_nonce=False)

@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from aiohttp import ClientError, ClientSession
 
@@ -29,9 +30,21 @@ class InvalidNonceError(RuntimeError):
     """Raised when AUCORSA rejects the cached nonce."""
 
 
-def _is_invalid_nonce_response(status_code: int, text: str) -> bool:
+def _should_refresh_context(status_code: int, text: str) -> bool:
     payload = text.strip()
-    return payload == "-1" or (status_code == 403 and "rest_cookie_invalid_nonce" in payload)
+    return status_code == 403 or payload == "-1" or "rest_cookie_invalid_nonce" in payload
+
+
+def _cookie_domains_for_urls(*urls: str) -> set[str]:
+    domains: set[str] = set()
+    for url in urls:
+        host = urlparse(url).hostname
+        if not host:
+            continue
+        normalized = host.lstrip(".")
+        domains.add(normalized)
+        domains.add(f".{normalized}")
+    return domains
 
 
 def normalize_line_label(label: str) -> str:
@@ -68,7 +81,23 @@ class AucorsaApi:
         self._last_request_monotonic = 0.0
         self._min_request_gap_seconds = min_request_gap_seconds
 
-    async def _throttled_get(self, url: str, params: Optional[dict[str, Any]] = None) -> str:
+    def _clear_aucorsa_cookies(self, *urls: str) -> None:
+        cookie_jar = getattr(self._session, "cookie_jar", None)
+        clear_domain = getattr(cookie_jar, "clear_domain", None)
+        if not callable(clear_domain):
+            return
+
+        current_api_url = self._context.api_url if self._context is not None else ""
+        for domain in _cookie_domains_for_urls(PAGE_URL, DEFAULT_API_URL, current_api_url, *urls):
+            clear_domain(domain)
+
+    async def _throttled_get(
+        self,
+        url: str,
+        params: Optional[dict[str, Any]] = None,
+        *,
+        refresh_context_on_403: bool = False,
+    ) -> str:
         async with self._request_lock:
             now = time.monotonic()
             delay = self._min_request_gap_seconds - (now - self._last_request_monotonic)
@@ -76,11 +105,12 @@ class AucorsaApi:
                 _LOGGER.debug("Waiting %.2f seconds before requesting %s", delay, url)
                 await asyncio.sleep(delay)
 
+            self._clear_aucorsa_cookies(url)
             async with self._session.get(url, params=params, headers=HEADERS, timeout=20) as response:
                 text = await response.text()
                 self._last_request_monotonic = time.monotonic()
 
-                if _is_invalid_nonce_response(response.status, text):
+                if refresh_context_on_403 and _should_refresh_context(response.status, text):
                     raise InvalidNonceError("AUCORSA rechazo el nonce actual")
 
                 if response.status >= 400:
@@ -153,15 +183,17 @@ class AucorsaApi:
             return await self._throttled_get(
                 f"{(context.api_url or DEFAULT_API_URL).rstrip('/')}{path}",
                 params=request_params,
+                refresh_context_on_403=True,
             )
         except InvalidNonceError as exc:
             if not retry_with_fresh_nonce:
                 raise RuntimeError(
-                    "La API rechazo el nonce incluso tras refrescar el contexto"
+                    "La API rechazo el contexto incluso tras limpiar cookies y refrescar el nonce"
                 ) from exc
 
             _LOGGER.debug("Nonce invalido o caducado; refrescando contexto y reintentando")
             self._context = None
+            self._clear_aucorsa_cookies(PAGE_URL, context.api_url or DEFAULT_API_URL)
             context = await self.refresh_context()
             request_params["_wpnonce"] = context.nonce
             return await self._api_get_text(path, request_params, retry_with_fresh_nonce=False)
